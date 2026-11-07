@@ -10,9 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +40,6 @@ jobs:
           done
           if [ -z "$SDKMANAGER" ]; then
             echo "sdkmanager was not found under $SDK_ROOT"
-            find /usr/local/lib/android -maxdepth 4 -type d 2>/dev/null | head -n 80
             exit 1
           fi
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
@@ -54,4 +58,12 @@ jobs:
           gradle-version: "8.9"
 
       - name: Build debug APK and run unit tests
-        run: gradle --no-daemon assembleDebug testDebugUnitTest
+        run: gradle --no-daemon --stacktrace assembleDebug testDebugUnitTest
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: test4-sms-gateway-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
