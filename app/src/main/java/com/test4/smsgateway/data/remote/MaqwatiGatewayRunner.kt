@@ -67,7 +67,7 @@ class MaqwatiGatewayRunner(
             val manager = if (Build.VERSION.SDK_INT >= 31)
                 context.getSystemService(SmsManager::class.java)
                     .createForSubscriptionId(sim.subscriptionId)
-            else @Suppress("DEPRECATION") SmsManager.getSmsManagerForSubscriptionId(sim.subscriptionId)
+            else SmsManager.getSmsManagerForSubscriptionId(sim.subscriptionId)
             val parts = manager.divideMessage(message)
             // Each segment needs its own confirmation; one sent result is not enough.
             // Limit pilot to a single SMS segment until multipart acknowledgements are implemented.
