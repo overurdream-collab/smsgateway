@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private var serverUrl by mutableStateOf("")
     private var smsTestOptIn by mutableStateOf(false)
     private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
+    private var workerDiagnostic by mutableStateOf("لم يبدأ فحص العامل بعد")
     private var keyFingerprint by mutableStateOf("")
     private var simAvailability by mutableStateOf<SimAvailability>(
         SimAvailability.PermissionRequired
@@ -74,6 +75,7 @@ class MainActivity : ComponentActivity() {
         // Never restore SMS opt-in across application restarts.
         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
         refreshSimStatus()
+        refreshWorkerDiagnostic()
 
         setContent {
             MaterialTheme(
@@ -88,6 +90,7 @@ class MainActivity : ComponentActivity() {
                     serverUrl = serverUrl,
                     enrollmentStatus = enrollmentStatus,
                     keyFingerprint = keyFingerprint,
+                    workerDiagnostic = workerDiagnostic,
                     onServerUrlChange = { serverUrl = it },
                     onCreateIdentity = {
                         try {
@@ -140,7 +143,7 @@ class MainActivity : ComponentActivity() {
                                 getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
                                 try {
                                     ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
-                                    enrollmentStatus = "تم بدء العامل؛ الإرسال محظور في النسخة التجريبية"
+                                    enrollmentStatus = "تم طلب تشغيل العامل؛ راجع حالة العامل أدناه"
                                 } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
                             }
                         }
@@ -187,6 +190,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::simManager.isInitialized) refreshSimStatus()
+        refreshWorkerDiagnostic()
+    }
+
+    private fun refreshWorkerDiagnostic() {
+        workerDiagnostic = getSharedPreferences("gateway_settings", MODE_PRIVATE)
+            .getString("worker_diagnostic", "لم يبدأ فحص العامل بعد") ?: "غير معروف"
     }
 
     private fun refreshSimStatus() {
@@ -200,6 +209,7 @@ private fun GatewayDashboard(
     serverUrl: String,
     enrollmentStatus: String,
     keyFingerprint: String,
+    workerDiagnostic: String,
     onServerUrlChange: (String) -> Unit,
     onCreateIdentity: () -> Unit,
     onTestConnection: () -> Unit,
@@ -259,6 +269,8 @@ private fun GatewayDashboard(
             Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
                 Text(if (smsTestOptIn) "تعطيل اختبار إرسال SMS" else "تمكين اختبار SMS يدوياً — بعد اعتماد المسؤول")
             }
+            StatusCard("التفعيل المحلي", if (smsTestOptIn) "مفعّل للاختبار" else "معطّل", "لا يعني التفعيل المحلي موافقة الخادم على الإرسال")
+            StatusCard("تشخيص العامل", workerDiagnostic, "لتحديث التشخيص أغلق الشاشة وافتحها مجدداً")
             Button(onClick = onStartWorker, modifier = Modifier.fillMaxWidth()) { Text("تشغيل العامل") }
             Button(onClick = onStopWorker, modifier = Modifier.fillMaxWidth()) { Text("إيقاف العامل") }
             Button(onClick = onScanSim, modifier = Modifier.fillMaxWidth()) {
