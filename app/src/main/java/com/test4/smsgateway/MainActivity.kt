@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var identity: DeviceIdentity
     private var serverUrl by mutableStateOf("")
     private var smsTestOptIn by mutableStateOf(false)
+    private var workerRequested by mutableStateOf(false)
     private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
     private var workerDiagnostic by mutableStateOf("لم يبدأ فحص العامل بعد")
     private var keyFingerprint by mutableStateOf("")
@@ -122,6 +124,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     smsTestOptIn = smsTestOptIn,
+                    workerRequested = workerRequested,
                     onToggleSmsTest = {
                         val enabled = !smsTestOptIn
                         if (enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -143,7 +146,8 @@ class MainActivity : ComponentActivity() {
                                 getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
                                 try {
                                     ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
-                                    enrollmentStatus = "تم طلب تشغيل العامل؛ راجع حالة العامل أدناه"
+                                    workerRequested = true
+                                    enrollmentStatus = "تم طلب تشغيل البوابة؛ الإرسال يحتاج تصريحاً مستقلاً"
                                 } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
                             }
                         }
@@ -152,6 +156,7 @@ class MainActivity : ComponentActivity() {
                         smsTestOptIn = false
                         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
                         stopService(android.content.Intent(this, GatewayWorkerService::class.java))
+                        workerRequested = false
                         enrollmentStatus = "تم إيقاف العامل"
                     },
                     onTestConnection = {
@@ -215,6 +220,7 @@ private fun GatewayDashboard(
     onTestConnection: () -> Unit,
     onProveDevice: () -> Unit,
     smsTestOptIn: Boolean,
+    workerRequested: Boolean,
     onToggleSmsTest: () -> Unit,
     onStartWorker: () -> Unit,
     onStopWorker: () -> Unit,
@@ -229,63 +235,59 @@ private fun GatewayDashboard(
             Text("TEST4 SMS Gateway", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF17231D))
             Text("بوابة إرسال رسائل التحقق", color = Color(0xFF63736A))
 
-            StatusCard("تسجيل الجهاز", enrollmentStatus, if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف" else "بصمة المفتاح SHA-256: $keyFingerprint")
-            Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) { Text("إنشاء مفتاح الجهاز الآمن") }
-            Button(onClick = onCopyEnrollment, modifier = Modifier.fillMaxWidth()) { Text("نسخ المفتاح العام ومعرّف الجهاز للمسؤول") }
-            OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
-                label = { Text("عنوان الخادم HTTPS") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = onProveDevice, modifier = Modifier.fillMaxWidth()) { Text("إثبات امتلاك مفتاح الجهاز") }
-            Button(onClick = onTestConnection, modifier = Modifier.fillMaxWidth()) { Text("حفظ العنوان وفحص اعتماد الجهاز") }
-            Text("الاتصال والشرائح", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            StatusCard("خادم مقتني لينك", "غير متصل حتى نجاح الفحص", "يتطلب تسجيل المفتاح العام وموافقة المسؤول على الخادم")
+            StatusCard("حالة البوابة", if (workerRequested) "تم طلب التشغيل" else "متوقفة",
+                "التشغيل لا يفعّل إرسال SMS تلقائياً")
+            StatusCard("آخر نتيجة", enrollmentStatus, workerDiagnostic)
+            Button(
+                onClick = if (workerRequested) onStopWorker else onStartWorker,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (workerRequested) "إيقاف البوابة" else "تشغيل البوابة") }
+            Button(onClick = {
+                onScanSim()
+                onTestConnection()
+            }, modifier = Modifier.fillMaxWidth()) { Text("فحص الاتصال") }
+            val readySims = (simAvailability as? SimAvailability.Available)?.subscriptions
+                ?.count { it.isReady } ?: 0
+            Text("الشرائح الجاهزة: $readySims", color = Color(0xFF63736A))
+            Text("إرسال الرسائل: " + if (smsTestOptIn) "مسموح محلياً للاختبار فقط" else "معطّل محلياً",
+                color = Color(0xFF63736A))
 
-            when (val state = simAvailability) {
-                SimAvailability.PermissionRequired -> StatusCard(
-                    "الشريحة SIM 1",
-                    "إذن الوصول مطلوب",
-                    "اضغط فحص الشريحة واسمح للتطبيق بقراءة حالة الشريحة فقط"
-                )
-                SimAvailability.TelephonyUnavailable -> StatusCard(
-                    "الشريحة SIM 1",
-                    "خدمة الاتصالات غير متاحة",
-                    "تعذر الوصول إلى خدمة شرائح الهاتف على هذا الجهاز"
-                )
-                is SimAvailability.Available -> {
-                    if (state.subscriptions.isEmpty()) {
-                        StatusCard("الشريحة SIM 1", "لم يتم العثور على شريحة", "تحقق من تركيب الشريحة وتفعيلها")
-                    } else {
-                        state.subscriptions.forEach { sim ->
-                            StatusCard(
-                                "SIM ${sim.slotIndex + 1} — ${sim.displayName}",
-                                if (sim.isReady) "جاهزة" else "غير جاهزة",
-                                if (sim.isDefaultForSms) "الشريحة الافتراضية للرسائل النصية"
-                                else "معرّف الشريحة: ${sim.subscriptionId}"
-                            )
-                        }
+            var showSetup by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            Text("إعداد الجهاز والتشخيص المتقدم", color = GatewayGreen,
+                modifier = Modifier.clickable { showSetup = !showSetup })
+            if (showSetup) {
+                Text("إعداد أولي — لا تعِد إنشاء المفتاح إذا كان الجهاز مسجلاً",
+                    color = Color(0xFF8A5A16))
+                OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
+                    label = { Text("عنوان الخادم HTTPS") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
+                StatusCard("تسجيل الجهاز", enrollmentStatus,
+                    if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف"
+                    else "بصمة SHA-256: $keyFingerprint")
+                Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) {
+                    Text("إنشاء أو عرض هوية الجهاز")
+                }
+                Button(onClick = onCopyEnrollment, modifier = Modifier.fillMaxWidth()) {
+                    Text("نسخ بيانات التسجيل للمسؤول")
+                }
+                Button(onClick = onProveDevice, modifier = Modifier.fillMaxWidth()) {
+                    Text("إثبات ملكية المفتاح")
+                }
+                Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (smsTestOptIn) "إلغاء تصريح اختبار SMS"
+                         else "تصريح اختبار SMS المحلي — بعد موافقة المسؤول")
+                }
+                StatusCard("تشخيص العامل", workerDiagnostic, "تتحدث النتيجة عند العودة إلى الشاشة")
+                Text("حالة الشرائح", fontWeight = FontWeight.SemiBold)
+                when (val state = simAvailability) {
+                    is SimAvailability.Available -> state.subscriptions.forEach { sim ->
+                        StatusCard("SIM ${sim.slotIndex + 1} — ${sim.displayName}",
+                            if (sim.isReady) "جاهزة" else "غير جاهزة",
+                            if (sim.isDefaultForSms) "الشريحة الافتراضية" else "شريحة إضافية")
                     }
+                    else -> Text("يجب منح إذن قراءة حالة الشرائح أو فحص توفرها")
                 }
             }
-
-            Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
-                Text(if (smsTestOptIn) "تعطيل اختبار إرسال SMS" else "تمكين اختبار SMS يدوياً — بعد اعتماد المسؤول")
-            }
-            StatusCard("التفعيل المحلي", if (smsTestOptIn) "مفعّل للاختبار" else "معطّل", "لا يعني التفعيل المحلي موافقة الخادم على الإرسال")
-            StatusCard("تشخيص العامل", workerDiagnostic, "لتحديث التشخيص أغلق الشاشة وافتحها مجدداً")
-            Button(onClick = onStartWorker, modifier = Modifier.fillMaxWidth()) { Text("تشغيل العامل") }
-            Button(onClick = onStopWorker, modifier = Modifier.fillMaxWidth()) { Text("إيقاف العامل") }
-            Button(onClick = onScanSim, modifier = Modifier.fillMaxWidth()) {
-                Text("فحص الشريحة")
-            }
-
-            Text("إحصاءات الإرسال", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard("مرسلة", "0", Modifier.weight(1f))
-                MetricCard("فاشلة", "0", Modifier.weight(1f))
-                MetricCard("معلّقة", "0", Modifier.weight(1f))
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("نسخة تأسيسية — لا تنفذ إرسال SMS حالياً", color = Color(0xFF8A5A16), fontSize = 12.sp)
         }
     }
 }
