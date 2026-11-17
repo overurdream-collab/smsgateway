@@ -46,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var simManager: AndroidSimManager
     private lateinit var identity: DeviceIdentity
     private var serverUrl by mutableStateOf("")
+    private var smsTestOptIn by mutableStateOf(false)
     private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
     private var keyFingerprint by mutableStateOf("")
     private var simAvailability by mutableStateOf<SimAvailability>(
@@ -70,6 +71,8 @@ class MainActivity : ComponentActivity() {
         simManager = AndroidSimManager(this)
         identity = DeviceIdentity(this)
         serverUrl = getSharedPreferences("gateway_settings", MODE_PRIVATE).getString("server_url", "") ?: ""
+        // Never restore SMS opt-in across application restarts.
+        getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
         refreshSimStatus()
 
         setContent {
@@ -115,6 +118,18 @@ class MainActivity : ComponentActivity() {
                             }.start()
                         }
                     },
+                    smsTestOptIn = smsTestOptIn,
+                    onToggleSmsTest = {
+                        val enabled = !smsTestOptIn
+                        if (enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
+                            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                            enrollmentStatus = "امنح إذن SMS ثم اضغط التفعيل اليدوي مرة أخرى"
+                        } else {
+                            smsTestOptIn = enabled
+                            getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", enabled).apply()
+                            enrollmentStatus = if (enabled) "تم طلب وضع الاختبار يدوياً؛ يلزم تمكين الخادم واعتماد الجهاز" else "تم تعطيل إرسال SMS"
+                        }
+                    },
                     onStartWorker = {
                         if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
                             smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
@@ -131,6 +146,8 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onStopWorker = {
+                        smsTestOptIn = false
+                        getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
                         stopService(android.content.Intent(this, GatewayWorkerService::class.java))
                         enrollmentStatus = "تم إيقاف العامل"
                     },
@@ -187,6 +204,8 @@ private fun GatewayDashboard(
     onCreateIdentity: () -> Unit,
     onTestConnection: () -> Unit,
     onProveDevice: () -> Unit,
+    smsTestOptIn: Boolean,
+    onToggleSmsTest: () -> Unit,
     onStartWorker: () -> Unit,
     onStopWorker: () -> Unit,
     onCopyEnrollment: () -> Unit,
@@ -237,6 +256,9 @@ private fun GatewayDashboard(
                 }
             }
 
+            Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
+                Text(if (smsTestOptIn) "تعطيل اختبار إرسال SMS" else "تمكين اختبار SMS يدوياً — بعد اعتماد المسؤول")
+            }
             Button(onClick = onStartWorker, modifier = Modifier.fillMaxWidth()) { Text("تشغيل العامل") }
             Button(onClick = onStopWorker, modifier = Modifier.fillMaxWidth()) { Text("إيقاف العامل") }
             Button(onClick = onScanSim, modifier = Modifier.fillMaxWidth()) {
