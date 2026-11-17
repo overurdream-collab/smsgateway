@@ -4,7 +4,7 @@ on:
   push:
     branches: ['integration/maqwati-samsung-secure-20261117', 'fix/fin25-worker-diagnostics-20261118']
   pull_request:
-    branches: [main]
+    branches: [main, integration/maqwati-samsung-secure-20261117]
   workflow_dispatch:
 
 permissions:
