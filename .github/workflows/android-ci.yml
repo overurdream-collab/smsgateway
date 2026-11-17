@@ -2,13 +2,13 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/maqwati-otp-api-client-20261117]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: android-ci-${{ github.ref }}
@@ -67,3 +67,18 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7
+
+      - name: Publish pilot debug APK as prerelease
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/maqwati-otp-api-client-20261117'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="sms-gateway-pilot-${GITHUB_SHA:0:12}"
+          gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk#sms-gateway-pilot-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SMS Gateway pilot APK (${GITHUB_SHA:0:12})" \
+            --notes "Debug APK for controlled Android 11 SIM detection testing only. OTP enrollment/background dispatch and real SMS testing are NOT complete. Do not use for production." \
+            --prerelease
