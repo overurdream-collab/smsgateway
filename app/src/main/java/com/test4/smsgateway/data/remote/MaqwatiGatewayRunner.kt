@@ -28,6 +28,9 @@ class MaqwatiGatewayRunner(
     private val simManager: AndroidSimManager = AndroidSimManager(context),
 ) {
     fun runOne(): Boolean {
+        // Never dispatch SMS until backend queue reconciliation and idempotency are verified.
+        // This guard is intentionally fail-closed for the integration preview.
+        check(false) { "SMS dispatch disabled pending FIN25 queue integration" }
         val response = JSONObject(api.poll())
         if (response.isNull("job")) return false
         val job = response.getJSONObject("job")
