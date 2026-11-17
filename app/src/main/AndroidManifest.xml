@@ -16,6 +16,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SMSGateway"
         android:usesCleartextTraffic="false">
+        <service android:name=".GatewayWorkerService" android:exported="false" android:foregroundServiceType="dataSync" />
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
