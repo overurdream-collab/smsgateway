@@ -76,9 +76,9 @@ jobs:
         run: |
           set -euo pipefail
           TAG="sms-gateway-pilot-${GITHUB_SHA:0:12}"
-          gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk#sms-gateway-pilot-debug.apk \\
-            --repo "$GITHUB_REPOSITORY" \\
-            --target "$GITHUB_SHA" \\
-            --title "SMS Gateway pilot APK (${GITHUB_SHA:0:12})" \\
-            --notes "Debug APK for controlled Android 11 SIM detection testing only. OTP enrollment/background dispatch and real SMS testing are NOT complete. Do not use for production." \\
+          gh release create "$TAG" app/build/outputs/apk/debug/app-debug.apk#sms-gateway-pilot-debug.apk \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "SMS Gateway pilot APK (${GITHUB_SHA:0:12})" \
+            --notes "Debug APK for controlled Android 11 SIM detection testing only. OTP enrollment/background dispatch and real SMS testing are NOT complete. Do not use for production." \
             --prerelease
