@@ -103,7 +103,25 @@ class MainActivity : ComponentActivity() {
                             if (proof.optBoolean("proved")) "تم إثبات ملكية الجهاز؛ بانتظار موافقة المسؤول"
                             else "الجهاز غير معتمد؛ يلزم استكمال التسجيل لدى المسؤول"
                         } catch (_: Exception) {
-                            "الجهاز غير مسجل أو غير معتمد؛ يلزم طلب تسجيل آمن من المسؤول"
+                            try {
+                                val enrollment = GatewayEnrollmentClient(serverUrl.trim().trimEnd('/'), identity)
+                                val request = enrollment.requestEnrollment()
+                                when (request.optString("status")) {
+                                    "active" -> "الجهاز معتمد؛ أعد فحص الاتصال"
+                                    "proved" -> "تم إثبات الجهاز؛ بانتظار اعتماد المسؤول"
+                                    "pending" -> {
+                                        try {
+                                            enrollment.prove()
+                                            "أُرسل التسجيل وأُثبت المفتاح؛ بانتظار اعتماد المسؤول"
+                                        } catch (_: Exception) {
+                                            "تم إرسال طلب التسجيل؛ بانتظار إكمال الإثبات والاعتماد"
+                                        }
+                                    }
+                                    else -> "تعذر تحديد حالة تسجيل الجهاز"
+                                }
+                            } catch (e: Exception) {
+                                "تعذر إرسال طلب التسجيل: ${e.javaClass.simpleName}"
+                            }
                         }
                     } else "فشل الاتصال: HTTP ${e.statusCode}"
                 } catch (e: Exception) { "تعذر فحص الجهاز: ${e.javaClass.simpleName}" }
