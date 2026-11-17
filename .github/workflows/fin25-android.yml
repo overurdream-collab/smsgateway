@@ -2,7 +2,7 @@ name: FIN25 Android integration build
 
 on:
   push:
-    branches: ['integration/maqwati-samsung-secure-20261117']
+    branches: ['integration/maqwati-samsung-secure-20261117', 'fix/fin25-worker-diagnostics-20261118']
   pull_request:
     branches: [main]
   workflow_dispatch:
