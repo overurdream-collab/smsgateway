@@ -42,6 +42,10 @@ class MainActivity : ComponentActivity() {
         SimAvailability.PermissionRequired
     )
 
+    private val smsPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        enrollmentStatus = if (granted) "تم منح إذن SMS؛ اضغط تشغيل العامل" else "إذن SMS مطلوب للإرسال"
+    }
+
     private val phonePermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             simAvailability = if (granted) {
@@ -137,6 +141,8 @@ private fun GatewayDashboard(
                 }
             }
 
+            Button(onClick = onStartWorker, modifier = Modifier.fillMaxWidth()) { Text("تشغيل عامل SMS") }
+            Button(onClick = onStopWorker, modifier = Modifier.fillMaxWidth()) { Text("إيقاف عامل SMS") }
             Button(onClick = onScanSim, modifier = Modifier.fillMaxWidth()) {
                 Text("فحص الشريحة")
             }
