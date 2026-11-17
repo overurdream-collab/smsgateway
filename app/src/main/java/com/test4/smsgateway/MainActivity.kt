@@ -88,6 +88,14 @@ class MainActivity : ComponentActivity() {
                             enrollmentStatus = \"معرّف الجهاز: ${identity.deviceId} — المفتاح جاهز، ينتظر موافقة المسؤول\"
                         } catch (e: Exception) { enrollmentStatus = \"فشل إنشاء المفتاح: ${e.javaClass.simpleName}\" }
                     },
+                    onCopyEnrollment = {
+                        try {
+                            val payload = \"Device ID: ${identity.deviceId}\\nPublic key PEM:\\n${identity.publicKeyPem()}\\nSHA-256: ${identity.fingerprint()}\"
+                            val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(\"Gateway enrollment\", payload))
+                            enrollmentStatus = \"تم نسخ بيانات التسجيل العامة للمسؤول؛ لا تشاركها إلا عبر قناة موثوقة\"
+                        } catch (e: Exception) { enrollmentStatus = \"أنشئ المفتاح أولاً\" }
+                    },
                     onTestConnection = {
                         val url = serverUrl.trim().trimEnd('/')
                         if (!url.startsWith(\"https://\")) {
@@ -140,6 +148,7 @@ private fun GatewayDashboard(
     onServerUrlChange: (String) -> Unit,
     onCreateIdentity: () -> Unit,
     onTestConnection: () -> Unit,
+    onCopyEnrollment: () -> Unit,
     onScanSim: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -152,6 +161,7 @@ private fun GatewayDashboard(
 
             StatusCard("تسجيل الجهاز", enrollmentStatus, if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف" else "بصمة المفتاح SHA-256: $keyFingerprint")
             Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) { Text("إنشاء مفتاح الجهاز الآمن") }
+            Button(onClick = onCopyEnrollment, modifier = Modifier.fillMaxWidth()) { Text("نسخ المفتاح العام ومعرّف الجهاز للمسؤول") }
             OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
                 label = { Text("عنوان الخادم HTTPS") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Button(onClick = onTestConnection, modifier = Modifier.fillMaxWidth()) { Text("حفظ العنوان وفحص اعتماد الجهاز") }
