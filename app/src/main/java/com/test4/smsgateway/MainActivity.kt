@@ -73,6 +73,14 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         simManager = AndroidSimManager(this)
         identity = DeviceIdentity(this)
+        // Generate or reuse the Android Keystore identity automatically; never export private keys.
+        try {
+            identity.ensureKey()
+            keyFingerprint = identity.fingerprint()
+            enrollmentStatus = "هوية الجهاز جاهزة؛ التفعيل يتطلب اعتماد المسؤول"
+        } catch (e: Exception) {
+            enrollmentStatus = "تعذر إعداد هوية الجهاز: ${e.javaClass.simpleName}"
+        }
         serverUrl = getSharedPreferences("gateway_settings", MODE_PRIVATE).getString("server_url", "") ?: ""
         // Never restore SMS opt-in across application restarts.
         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
@@ -264,14 +272,10 @@ private fun GatewayDashboard(
                 StatusCard("تسجيل الجهاز", enrollmentStatus,
                     if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف"
                     else "بصمة SHA-256: $keyFingerprint")
-                Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) {
-                    Text("إنشاء أو عرض هوية الجهاز")
-                }
-                Button(onClick = onCopyEnrollment, modifier = Modifier.fillMaxWidth()) {
-                    Text("نسخ بيانات التسجيل للمسؤول")
-                }
+                Text("يُنشئ التطبيق المعرّف وبصمة المفتاح تلقائياً ويحفظ المفتاح الخاص داخل Android Keystore.")
+                Text("لا يلزم نسخ البيانات أثناء الاستخدام. تسجيل جهاز جديد بالخادم لا يزال يتطلب إجراءً آمناً من المسؤول.")
                 Button(onClick = onProveDevice, modifier = Modifier.fillMaxWidth()) {
-                    Text("إثبات ملكية المفتاح")
+                    Text("إكمال إثبات الجهاز المسجّل")
                 }
                 Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
                     Text(if (smsTestOptIn) "إلغاء تصريح اختبار SMS"
