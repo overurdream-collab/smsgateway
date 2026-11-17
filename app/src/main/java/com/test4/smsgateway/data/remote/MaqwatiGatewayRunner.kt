@@ -28,9 +28,9 @@ class MaqwatiGatewayRunner(
     private val simManager: AndroidSimManager = AndroidSimManager(context),
 ) {
     fun runOne(): Boolean {
-        // Never dispatch SMS until backend queue reconciliation and idempotency are verified.
-        // This guard is intentionally fail-closed for the integration preview.
-        check(false) { "SMS dispatch disabled pending FIN25 queue integration" }
+        // Invoked only after explicit device-side opt-in; server also requires operator enable.
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED) return false
         val response = JSONObject(api.poll())
         if (response.isNull("job")) return false
         val job = response.getJSONObject("job")
@@ -40,8 +40,7 @@ class MaqwatiGatewayRunner(
         require(recipient.matches(Regex("^\\+967[0-9]{9}$")))
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
             != PackageManager.PERMISSION_GRANTED) {
-            api.report(id, "failed", 0)
-            return true
+            return false
         }
         val available = simManager.getAvailableSims() as? SimAvailability.Available
         val sim = available?.subscriptions?.firstOrNull { it.isReady && it.isDefaultForSms }
