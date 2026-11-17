@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private var serverUrl by mutableStateOf("")
     private var smsTestOptIn by mutableStateOf(false)
     private var workerRequested by mutableStateOf(false)
+    private var setupAttempted = false
     private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
     private var workerDiagnostic by mutableStateOf("لم يبدأ فحص العامل بعد")
     private var keyFingerprint by mutableStateOf("")
@@ -86,6 +87,29 @@ class MainActivity : ComponentActivity() {
         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
         refreshSimStatus()
         refreshWorkerDiagnostic()
+        // For previously enrolled devices, complete possession proof automatically.
+        // New-device enrollment still requires an authorized server-side registration flow.
+        if (!setupAttempted && serverUrl.trim().startsWith("https://")) {
+            setupAttempted = true
+            Thread {
+                val result = try {
+                    val api = MaqwatiGatewayApi(serverUrl.trim().trimEnd('/'), identity.deviceId, DeviceIdentity.ALIAS)
+                    api.heartbeat()
+                    "الجهاز معتمد ومتصل"
+                } catch (e: com.test4.smsgateway.data.remote.GatewayHttpException) {
+                    if (e.statusCode == 401 || e.statusCode == 409) {
+                        try {
+                            val proof = GatewayEnrollmentClient(serverUrl.trim().trimEnd('/'), identity).prove()
+                            if (proof.optBoolean("proved")) "تم إثبات ملكية الجهاز؛ بانتظار موافقة المسؤول"
+                            else "الجهاز غير معتمد؛ يلزم استكمال التسجيل لدى المسؤول"
+                        } catch (_: Exception) {
+                            "الجهاز غير مسجل أو غير معتمد؛ يلزم طلب تسجيل آمن من المسؤول"
+                        }
+                    } else "فشل الاتصال: HTTP ${e.statusCode}"
+                } catch (e: Exception) { "تعذر فحص الجهاز: ${e.javaClass.simpleName}" }
+                runOnUiThread { enrollmentStatus = result }
+            }.start()
+        }
 
         setContent {
             MaterialTheme(
