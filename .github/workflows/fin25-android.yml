@@ -1,0 +1,27 @@
+name: FIN25 Android integration build
+on:
+  push:
+    branches: ['integration/maqwati-samsung-secure-20261117']
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/fin25-android.yml'
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew && ./gradlew --no-daemon :app:testDebugUnitTest :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fin25-samsung-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
