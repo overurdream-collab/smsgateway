@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.IBinder
 import android.os.Process
 import androidx.core.app.NotificationCompat
+import com.test4.smsgateway.data.remote.MaqwatiGatewayRunner
 import com.test4.smsgateway.data.remote.MaqwatiGatewayApi
 import com.test4.smsgateway.security.DeviceIdentity
 
@@ -38,9 +39,15 @@ class GatewayWorkerService : Service() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             val identity = DeviceIdentity(this)
             val api = MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS)
+            val runner = MaqwatiGatewayRunner(this, api)
                 while (running && !Thread.currentThread().isInterrupted) {
                 try {
                     api.heartbeat()
+                    // A local explicit opt-in AND server-side operator flag are required.
+                    if (getSharedPreferences("gateway_settings", MODE_PRIVATE)
+                            .getBoolean("sms_test_opt_in", false)) {
+                        runner.runOne()
+                    }
                 } catch (_: Exception) {
                     // Heartbeat-only preview. Dispatch remains disabled until backend queue tests pass.
                 }
