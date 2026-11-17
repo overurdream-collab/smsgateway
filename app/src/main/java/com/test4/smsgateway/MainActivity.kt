@@ -44,9 +44,9 @@ private val GatewayBackground = Color(0xFFF5F7F6)
 class MainActivity : ComponentActivity() {
     private lateinit var simManager: AndroidSimManager
     private lateinit var identity: DeviceIdentity
-    private var serverUrl by mutableStateOf(\"\")
-    private var enrollmentStatus by mutableStateOf(\"لم يتم إنشاء مفتاح\")
-    private var keyFingerprint by mutableStateOf(\"\")
+    private var serverUrl by mutableStateOf("")
+    private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
+    private var keyFingerprint by mutableStateOf("")
     private var simAvailability by mutableStateOf<SimAvailability>(
         SimAvailability.PermissionRequired
     )
@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         simManager = AndroidSimManager(this)
         identity = DeviceIdentity(this)
-        serverUrl = getSharedPreferences(\"gateway_settings\", MODE_PRIVATE).getString(\"server_url\", \"\") ?: \"\"
+        serverUrl = getSharedPreferences("gateway_settings", MODE_PRIVATE).getString("server_url", "") ?: ""
         refreshSimStatus()
 
         setContent {
@@ -85,29 +85,29 @@ class MainActivity : ComponentActivity() {
                         try {
                             identity.ensureKey()
                             keyFingerprint = identity.fingerprint()
-                            enrollmentStatus = \"معرّف الجهاز: ${identity.deviceId} — المفتاح جاهز، ينتظر موافقة المسؤول\"
-                        } catch (e: Exception) { enrollmentStatus = \"فشل إنشاء المفتاح: ${e.javaClass.simpleName}\" }
+                            enrollmentStatus = "معرّف الجهاز: ${identity.deviceId} — المفتاح جاهز، ينتظر موافقة المسؤول"
+                        } catch (e: Exception) { enrollmentStatus = "فشل إنشاء المفتاح: ${e.javaClass.simpleName}" }
                     },
                     onCopyEnrollment = {
                         try {
-                            val payload = \"Device ID: ${identity.deviceId}\\nPublic key PEM:\\n${identity.publicKeyPem()}\\nSHA-256: ${identity.fingerprint()}\"
+                            val payload = "Device ID: ${identity.deviceId}\\nPublic key PEM:\\n${identity.publicKeyPem()}\\nSHA-256: ${identity.fingerprint()}"
                             val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText(\"Gateway enrollment\", payload))
-                            enrollmentStatus = \"تم نسخ بيانات التسجيل العامة للمسؤول؛ لا تشاركها إلا عبر قناة موثوقة\"
-                        } catch (e: Exception) { enrollmentStatus = \"أنشئ المفتاح أولاً\" }
+                            clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Gateway enrollment", payload))
+                            enrollmentStatus = "تم نسخ بيانات التسجيل العامة للمسؤول؛ لا تشاركها إلا عبر قناة موثوقة"
+                        } catch (e: Exception) { enrollmentStatus = "أنشئ المفتاح أولاً" }
                     },
                     onTestConnection = {
                         val url = serverUrl.trim().trimEnd('/')
-                        if (!url.startsWith(\"https://\")) {
-                            enrollmentStatus = \"يجب استخدام عنوان HTTPS موثوق\"
+                        if (!url.startsWith("https://")) {
+                            enrollmentStatus = "يجب استخدام عنوان HTTPS موثوق"
                         } else {
-                            getSharedPreferences(\"gateway_settings\", MODE_PRIVATE).edit().putString(\"server_url\", url).apply()
-                            enrollmentStatus = \"جارٍ فحص الاتصال...\"
+                            getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
+                            enrollmentStatus = "جارٍ فحص الاتصال..."
                             Thread {
                                 val result = try {
                                     MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS).heartbeat()
-                                    \"الخادم متصل والجهاز معتمد\"
-                                } catch (e: Exception) { \"لم يتم الاتصال أو لم يُعتمد الجهاز: ${e.javaClass.simpleName}\" }
+                                    "الخادم متصل والجهاز معتمد"
+                                } catch (e: Exception) { "لم يتم الاتصال أو لم يُعتمد الجهاز: ${e.javaClass.simpleName}" }
                                 runOnUiThread { enrollmentStatus = result }
                             }.start()
                         }
