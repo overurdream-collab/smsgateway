@@ -1,6 +1,6 @@
 package com.test4.smsgateway.data.remote
 
-import java.net.HttpURLConnection
+import javax.net.ssl.HttpsURLConnection
 import java.net.URL
 import java.security.KeyStore
 import java.security.Signature
@@ -33,7 +33,7 @@ class MaqwatiGatewayApi(
             update(canonical.toByteArray(Charsets.UTF_8))
             Base64.getEncoder().encodeToString(sign())
         }
-        val conn = URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection
+        val conn = URL(baseUrl.trimEnd('/') + path).openConnection() as HttpsURLConnection
         try {
             conn.requestMethod = "POST"
             conn.connectTimeout = 10_000
@@ -46,7 +46,7 @@ class MaqwatiGatewayApi(
             conn.setRequestProperty("X-Signature", signature)
             conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             val response = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
-            val text = response.bufferedReader().use { it.readText() }
+            val text = response?.bufferedReader()?.use { it.readText() } ?: ""
             if (conn.responseCode !in 200..299) throw GatewayHttpException(conn.responseCode)
             return text
         } finally { conn.disconnect() }
