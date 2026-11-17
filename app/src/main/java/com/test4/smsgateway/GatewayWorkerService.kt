@@ -5,12 +5,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Intent
-import android.os.Build
 import android.os.IBinder
 import android.os.Process
 import androidx.core.app.NotificationCompat
 import com.test4.smsgateway.data.remote.MaqwatiGatewayApi
-import com.test4.smsgateway.data.remote.MaqwatiGatewayRunner
 import com.test4.smsgateway.security.DeviceIdentity
 
 /** User-started foreground worker. Never sends unless the server approves the device. */
@@ -40,13 +38,11 @@ class GatewayWorkerService : Service() {
             Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND)
             val identity = DeviceIdentity(this)
             val api = MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS)
-            val runner = MaqwatiGatewayRunner(this, api)
-            while (running && !Thread.currentThread().isInterrupted) {
+                while (running && !Thread.currentThread().isInterrupted) {
                 try {
                     api.heartbeat()
-                    runner.runOne()
                 } catch (_: Exception) {
-                    // Never auto-resend an uncertain SMS; the backend must reconcile the lease.
+                    // Heartbeat-only preview. Dispatch remains disabled until backend queue tests pass.
                 }
                 try { Thread.sleep(30_000) } catch (_: InterruptedException) { break }
             }
