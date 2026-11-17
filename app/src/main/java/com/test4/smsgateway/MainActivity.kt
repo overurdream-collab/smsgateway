@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +31,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.test4.smsgateway.security.DeviceIdentity
+import com.test4.smsgateway.data.remote.MaqwatiGatewayApi
 import com.test4.smsgateway.platform.telephony.AndroidSimManager
 import com.test4.smsgateway.platform.telephony.SimAvailability
 
@@ -38,6 +41,10 @@ private val GatewayBackground = Color(0xFFF5F7F6)
 
 class MainActivity : ComponentActivity() {
     private lateinit var simManager: AndroidSimManager
+    private lateinit var identity: DeviceIdentity
+    private var serverUrl by mutableStateOf(\"\")
+    private var enrollmentStatus by mutableStateOf(\"لم يتم إنشاء مفتاح\")
+    private var keyFingerprint by mutableStateOf(\"\")
     private var simAvailability by mutableStateOf<SimAvailability>(
         SimAvailability.PermissionRequired
     )
@@ -54,6 +61,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         simManager = AndroidSimManager(this)
+        identity = DeviceIdentity(this)
+        serverUrl = getSharedPreferences(\"gateway_settings\", MODE_PRIVATE).getString(\"server_url\", \"\") ?: \"\"
         refreshSimStatus()
 
         setContent {
@@ -66,6 +75,33 @@ class MainActivity : ComponentActivity() {
             ) {
                 GatewayDashboard(
                     simAvailability = simAvailability,
+                    serverUrl = serverUrl,
+                    enrollmentStatus = enrollmentStatus,
+                    keyFingerprint = keyFingerprint,
+                    onServerUrlChange = { serverUrl = it },
+                    onCreateIdentity = {
+                        try {
+                            identity.ensureKey()
+                            keyFingerprint = identity.fingerprint()
+                            enrollmentStatus = \"معرّف الجهاز: ${identity.deviceId} — المفتاح جاهز، ينتظر موافقة المسؤول\"
+                        } catch (e: Exception) { enrollmentStatus = \"فشل إنشاء المفتاح: ${e.javaClass.simpleName}\" }
+                    },
+                    onTestConnection = {
+                        val url = serverUrl.trim().trimEnd('/')
+                        if (!url.startsWith(\"https://\")) {
+                            enrollmentStatus = \"يجب استخدام عنوان HTTPS موثوق\"
+                        } else {
+                            getSharedPreferences(\"gateway_settings\", MODE_PRIVATE).edit().putString(\"server_url\", url).apply()
+                            enrollmentStatus = \"جارٍ فحص الاتصال...\"
+                            Thread {
+                                val result = try {
+                                    MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS).heartbeat()
+                                    \"الخادم متصل والجهاز معتمد\"
+                                } catch (e: Exception) { \"لم يتم الاتصال أو لم يُعتمد الجهاز: ${e.javaClass.simpleName}\" }
+                                runOnUiThread { enrollmentStatus = result }
+                            }.start()
+                        }
+                    },
                     onScanSim = {
                         val granted = ContextCompat.checkSelfPermission(
                             this,
@@ -96,19 +132,29 @@ class MainActivity : ComponentActivity() {
 @androidx.compose.runtime.Composable
 private fun GatewayDashboard(
     simAvailability: SimAvailability,
+    serverUrl: String,
+    enrollmentStatus: String,
+    keyFingerprint: String,
+    onServerUrlChange: (String) -> Unit,
+    onCreateIdentity: () -> Unit,
+    onTestConnection: () -> Unit,
     onScanSim: () -> Unit
 ) {
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
+            modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("TEST4 SMS Gateway", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF17231D))
             Text("بوابة إرسال رسائل التحقق", color = Color(0xFF63736A))
 
-            StatusCard("حالة البوابة", "غير مفعّلة", "لم يتم تسجيل الجهاز أو ربطه بالخادم بعد")
+            StatusCard("تسجيل الجهاز", enrollmentStatus, if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف" else "بصمة المفتاح SHA-256: $keyFingerprint")
+            Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) { Text("إنشاء مفتاح الجهاز الآمن") }
+            OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
+                label = { Text("عنوان الخادم HTTPS") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Button(onClick = onTestConnection, modifier = Modifier.fillMaxWidth()) { Text("حفظ العنوان وفحص اعتماد الجهاز") }
             Text("الاتصال والشرائح", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            StatusCard("خادم TEST4", "غير متصل", "سيتم إعداد HTTPS Polling بعد اعتماد عقد API")
+            StatusCard("خادم مقتني لينك", "غير متصل حتى نجاح الفحص", "يتطلب تسجيل المفتاح العام وموافقة المسؤول على الخادم")
 
             when (val state = simAvailability) {
                 SimAvailability.PermissionRequired -> StatusCard(
