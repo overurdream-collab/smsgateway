@@ -25,6 +25,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -143,6 +145,7 @@ class MainActivity : ComponentActivity() {
                     enrollmentStatus = enrollmentStatus,
                     keyFingerprint = keyFingerprint,
                     workerDiagnostic = workerDiagnostic,
+                    onRefreshWorkerDiagnostic = { refreshWorkerDiagnostic() },
                     onServerUrlChange = { serverUrl = it },
                     onCreateIdentity = {
                         try {
@@ -284,6 +287,7 @@ private fun GatewayDashboard(
     enrollmentStatus: String,
     keyFingerprint: String,
     workerDiagnostic: String,
+    onRefreshWorkerDiagnostic: () -> Unit,
     onServerUrlChange: (String) -> Unit,
     onCreateIdentity: () -> Unit,
     onTestConnection: () -> Unit,
@@ -296,6 +300,13 @@ private fun GatewayDashboard(
     onCopyEnrollment: () -> Unit,
     onScanSim: () -> Unit
 ) {
+    // Refresh the diagnostic written by the foreground worker while the dashboard is visible.
+    LaunchedEffect(Unit) {
+        while (true) {
+            onRefreshWorkerDiagnostic()
+            delay(2_000)
+        }
+    }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
