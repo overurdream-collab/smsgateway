@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
     )
 
     private val smsPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        enrollmentStatus = if (granted) "تم منح إذن SMS" else "إذن SMS مطلوب"
+        enrollmentStatus = if (granted) "تم منح إذن SMS؛ اضغط تصريح الاختبار لتفعيله" else "إذن SMS مطلوب"
     }
 
     private val phonePermissionLauncher =
@@ -186,7 +186,7 @@ class MainActivity : ComponentActivity() {
                         } else {
                             smsTestOptIn = enabled
                             getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", enabled).apply()
-                            enrollmentStatus = if (enabled) "تم طلب وضع الاختبار يدوياً؛ يلزم تمكين الخادم واعتماد الجهاز" else "تم تعطيل إرسال SMS"
+                            enrollmentStatus = if (enabled) "تصريح الإرسال المحلي مفعّل؛ يتطلب أيضاً اعتماد الجهاز وتمكين الإرسال بالخادم" else "تم تعطيل إرسال SMS"
                         }
                     },
                     onStartWorker = {
@@ -271,6 +271,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshWorkerDiagnostic() {
+        workerRequested = GatewayWorkerService.isRunning
+        smsTestOptIn = getSharedPreferences("gateway_settings", MODE_PRIVATE)
+            .getBoolean("sms_test_opt_in", false)
         workerDiagnostic = getSharedPreferences("gateway_settings", MODE_PRIVATE)
             .getString("worker_diagnostic", "لم يبدأ فحص العامل بعد") ?: "غير معروف"
     }
@@ -315,7 +318,7 @@ private fun GatewayDashboard(
             Text("TEST4 SMS Gateway", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF17231D))
             Text("بوابة إرسال رسائل التحقق", color = Color(0xFF63736A))
 
-            StatusCard("حالة البوابة", if (workerRequested) "تم طلب التشغيل" else "متوقفة",
+            StatusCard("حالة البوابة", if (workerRequested) "العامل يعمل" else "متوقفة",
                 "التشغيل لا يفعّل إرسال SMS تلقائياً")
             StatusCard("آخر نتيجة", enrollmentStatus, workerDiagnostic)
             Button(
@@ -353,7 +356,7 @@ private fun GatewayDashboard(
                     Text(if (smsTestOptIn) "إلغاء تصريح اختبار SMS"
                          else "تصريح اختبار SMS المحلي — بعد موافقة المسؤول")
                 }
-                StatusCard("تشخيص العامل", workerDiagnostic, "تتحدث النتيجة عند العودة إلى الشاشة")
+                StatusCard("تشخيص العامل", workerDiagnostic, "تُحدّث النتيجة كل ثانيتين أثناء فتح الشاشة")
                 Text("حالة الشرائح", fontWeight = FontWeight.SemiBold)
                 when (val state = simAvailability) {
                     is SimAvailability.Available -> state.subscriptions.forEach { sim ->

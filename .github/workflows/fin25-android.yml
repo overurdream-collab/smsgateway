@@ -2,7 +2,7 @@ name: FIN25 Android integration build
 
 on:
   push:
-    branches: ['integration/maqwati-samsung-secure-20261117', 'fix/fin25-worker-diagnostics-20261118']
+    branches: ['integration/maqwati-samsung-secure-20261117', 'fix/fin25-worker-diagnostics-20261118', 'fix/fin25-resume-validation-20261118']
   pull_request:
     branches: [main, integration/maqwati-samsung-secure-20261117]
   workflow_dispatch:
@@ -21,6 +21,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Test read-only preflight without Docker or SMS
+        shell: pwsh
+        run: ./scripts/test-fin25-preflight.ps1
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
