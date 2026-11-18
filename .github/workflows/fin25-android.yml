@@ -60,6 +60,27 @@ jobs:
       - name: Build debug APK and run unit tests
         run: gradle --no-daemon --stacktrace assembleDebug testDebugUnitTest
 
+      - name: Verify APK signature and record fingerprints
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          APKSIGNER="$ANDROID_HOME/build-tools/35.0.0/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee apk-signature-report.txt
+          sha256sum "$APK" | tee apk-sha256.txt
+          echo "Debug certificate is NOT a production release signing certificate." >> apk-signature-report.txt
+
+      - name: Upload signature verification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: fin25-apk-verification
+          path: |
+            apk-signature-report.txt
+            apk-sha256.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
