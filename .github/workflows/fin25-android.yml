@@ -64,6 +64,17 @@ jobs:
       - name: Build debug APK and run unit tests
         run: gradle --no-daemon --stacktrace assembleDebug testDebugUnitTest
 
+      - name: Upload unit test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fin25-unit-test-results
+          path: |
+            app/build/test-results/testDebugUnitTest/*.xml
+            app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: warn
+          retention-days: 7
+
       - name: Verify APK signature and record fingerprints
         shell: bash
         run: |

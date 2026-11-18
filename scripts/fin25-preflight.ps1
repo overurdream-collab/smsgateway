@@ -15,8 +15,10 @@ if (-not $ContainerId) {
     $ContainerId = $candidates[0].Trim()
 }
 if ($ContainerId -notmatch '^[a-fA-F0-9]{12,64}$') { throw 'Use a Docker container ID, not a name or command.' }
-$service = docker inspect --format '{{index .Config.Labels "com.docker.compose.service"}}' $ContainerId
-if ($LASTEXITCODE -ne 0 -or $service.Trim() -ne 'otp') { throw 'The selected container is not the Compose otp service.' }
+$labelsJson = docker inspect --format '{{json .Config.Labels}}' $ContainerId
+if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect the selected container labels.' }
+$labels = $labelsJson | ConvertFrom-Json
+if ($labels.'com.docker.compose.service' -ne 'otp') { throw 'The selected container is not the Compose otp service.' }
 Write-Output 'FIN25 read-only preflight: flags, queue counts and device status only.'
 
 $probe = @'

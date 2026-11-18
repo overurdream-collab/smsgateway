@@ -13,8 +13,8 @@ function global:docker {
             return 'aaaaaaaaaaaa'
         }
         'inspect' {
-            if ($global:ProbeCase -eq 'wrong_service') { return 'enrollment' }
-            return 'otp'
+            if ($global:ProbeCase -eq 'wrong_service') { return '{"com.docker.compose.service":"enrollment"}' }
+            return '{"com.docker.compose.service":"otp"}'
         }
         'exec' {
             $global:ProbePayload = ($input | Out-String)
