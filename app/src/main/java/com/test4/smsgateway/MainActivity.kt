@@ -187,19 +187,15 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onStartWorker = {
-                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
-                            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                        val url = serverUrl.trim().trimEnd('/')
+                        if (!url.startsWith("https://")) enrollmentStatus = "عنوان HTTPS مطلوب"
                         else {
-                            val url = serverUrl.trim().trimEnd('/')
-                            if (!url.startsWith("https://")) enrollmentStatus = "عنوان HTTPS مطلوب"
-                            else {
-                                getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
-                                try {
-                                    ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
-                                    workerRequested = true
-                                    enrollmentStatus = "تم طلب تشغيل البوابة؛ الإرسال يحتاج تصريحاً مستقلاً"
-                                } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
-                            }
+                            getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
+                            try {
+                                ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
+                                workerRequested = true
+                                enrollmentStatus = "تم طلب تشغيل البوابة؛ الإرسال يحتاج تصريح SMS وموافقة مستقلة"
+                            } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
                         }
                     },
                     onStopWorker = {
