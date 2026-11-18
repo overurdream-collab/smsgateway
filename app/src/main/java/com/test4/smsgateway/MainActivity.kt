@@ -6,6 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -24,6 +25,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -47,7 +50,10 @@ class MainActivity : ComponentActivity() {
     private lateinit var identity: DeviceIdentity
     private var serverUrl by mutableStateOf("")
     private var smsTestOptIn by mutableStateOf(false)
+    private var workerRequested by mutableStateOf(false)
+    private var setupAttempted = false
     private var enrollmentStatus by mutableStateOf("لم يتم إنشاء مفتاح")
+    private var workerDiagnostic by mutableStateOf("لم يبدأ فحص العامل بعد")
     private var keyFingerprint by mutableStateOf("")
     private var simAvailability by mutableStateOf<SimAvailability>(
         SimAvailability.PermissionRequired
@@ -70,10 +76,60 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         simManager = AndroidSimManager(this)
         identity = DeviceIdentity(this)
+        // Generate or reuse the Android Keystore identity automatically; never export private keys.
+        try {
+            identity.ensureKey()
+            keyFingerprint = identity.fingerprint()
+            enrollmentStatus = "هوية الجهاز جاهزة؛ التفعيل يتطلب اعتماد المسؤول"
+        } catch (e: Exception) {
+            enrollmentStatus = "تعذر إعداد هوية الجهاز: ${e.javaClass.simpleName}"
+        }
         serverUrl = getSharedPreferences("gateway_settings", MODE_PRIVATE).getString("server_url", "") ?: ""
         // Never restore SMS opt-in across application restarts.
         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
         refreshSimStatus()
+        refreshWorkerDiagnostic()
+        // For previously enrolled devices, complete possession proof automatically.
+        // New-device enrollment still requires an authorized server-side registration flow.
+        if (!setupAttempted && serverUrl.trim().startsWith("https://")) {
+            setupAttempted = true
+            Thread {
+                val result = try {
+                    val api = MaqwatiGatewayApi(serverUrl.trim().trimEnd('/'), identity.deviceId, DeviceIdentity.ALIAS)
+                    api.heartbeat()
+                    "الجهاز معتمد ومتصل"
+                } catch (e: com.test4.smsgateway.data.remote.GatewayHttpException) {
+                    if (e.statusCode == 401 || e.statusCode == 409) {
+                        try {
+                            val proof = GatewayEnrollmentClient(serverUrl.trim().trimEnd('/'), identity).prove()
+                            if (proof.optBoolean("proved")) "تم إثبات ملكية الجهاز؛ بانتظار موافقة المسؤول"
+                            else "الجهاز غير معتمد؛ يلزم استكمال التسجيل لدى المسؤول"
+                        } catch (_: Exception) {
+                            try {
+                                val enrollment = GatewayEnrollmentClient(serverUrl.trim().trimEnd('/'), identity)
+                                val request = enrollment.requestEnrollment()
+                                when (request.optString("status")) {
+                                    "active" -> "الجهاز معتمد؛ أعد فحص الاتصال"
+                                    "proved" -> "تم إثبات الجهاز؛ بانتظار اعتماد المسؤول"
+                                    "pending" -> {
+                                        try {
+                                            enrollment.prove()
+                                            "أُرسل التسجيل وأُثبت المفتاح؛ بانتظار اعتماد المسؤول"
+                                        } catch (_: Exception) {
+                                            "تم إرسال طلب التسجيل؛ بانتظار إكمال الإثبات والاعتماد"
+                                        }
+                                    }
+                                    else -> "تعذر تحديد حالة تسجيل الجهاز"
+                                }
+                            } catch (e: Exception) {
+                                "تعذر إرسال طلب التسجيل: ${e.javaClass.simpleName}"
+                            }
+                        }
+                    } else "فشل الاتصال: HTTP ${e.statusCode}"
+                } catch (e: Exception) { "تعذر فحص الجهاز: ${e.javaClass.simpleName}" }
+                runOnUiThread { enrollmentStatus = result }
+            }.start()
+        }
 
         setContent {
             MaterialTheme(
@@ -88,6 +144,8 @@ class MainActivity : ComponentActivity() {
                     serverUrl = serverUrl,
                     enrollmentStatus = enrollmentStatus,
                     keyFingerprint = keyFingerprint,
+                    workerDiagnostic = workerDiagnostic,
+                    onRefreshWorkerDiagnostic = { refreshWorkerDiagnostic() },
                     onServerUrlChange = { serverUrl = it },
                     onCreateIdentity = {
                         try {
@@ -119,6 +177,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     smsTestOptIn = smsTestOptIn,
+                    workerRequested = workerRequested,
                     onToggleSmsTest = {
                         val enabled = !smsTestOptIn
                         if (enabled && ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) {
@@ -131,24 +190,22 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     onStartWorker = {
-                        if (ContextCompat.checkSelfPermission(this, Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED)
-                            smsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                        val url = serverUrl.trim().trimEnd('/')
+                        if (!url.startsWith("https://")) enrollmentStatus = "عنوان HTTPS مطلوب"
                         else {
-                            val url = serverUrl.trim().trimEnd('/')
-                            if (!url.startsWith("https://")) enrollmentStatus = "عنوان HTTPS مطلوب"
-                            else {
-                                getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
-                                try {
-                                    ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
-                                    enrollmentStatus = "تم بدء العامل؛ الإرسال محظور في النسخة التجريبية"
-                                } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
-                            }
+                            getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putString("server_url", url).apply()
+                            try {
+                                ContextCompat.startForegroundService(this, android.content.Intent(this, GatewayWorkerService::class.java))
+                                workerRequested = true
+                                enrollmentStatus = "تم طلب تشغيل البوابة؛ الإرسال يحتاج تصريح SMS وموافقة مستقلة"
+                            } catch (e: Exception) { enrollmentStatus = "تعذر التشغيل: ${e.javaClass.simpleName}" }
                         }
                     },
                     onStopWorker = {
                         smsTestOptIn = false
                         getSharedPreferences("gateway_settings", MODE_PRIVATE).edit().putBoolean("sms_test_opt_in", false).apply()
                         stopService(android.content.Intent(this, GatewayWorkerService::class.java))
+                        workerRequested = false
                         enrollmentStatus = "تم إيقاف العامل"
                     },
                     onTestConnection = {
@@ -162,7 +219,30 @@ class MainActivity : ComponentActivity() {
                                 val result = try {
                                     MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS).heartbeat()
                                     "الخادم متصل والجهاز معتمد"
-                                } catch (e: Exception) { "لم يتم الاتصال أو لم يُعتمد الجهاز: ${e.javaClass.simpleName}" }
+                                } catch (e: com.test4.smsgateway.data.remote.GatewayHttpException) {
+                                    if (e.statusCode == 401 || e.statusCode == 409) {
+                                        try {
+                                            val enrollment = GatewayEnrollmentClient(url, identity)
+                                            val response = enrollment.requestEnrollment()
+                                            when (response.optString("status")) {
+                                                "pending" -> {
+                                                    try {
+                                                        enrollment.prove()
+                                                        "تم إثبات هوية الجهاز؛ بانتظار اعتماد المسؤول"
+                                                    } catch (_: Exception) {
+                                                        "طلب التسجيل معلق؛ تعذر إكمال إثبات المفتاح"
+                                                    }
+                                                }
+                                                "proved" -> "هوية الجهاز مثبتة؛ بانتظار اعتماد المسؤول"
+                                                "active" -> "الجهاز معتمد؛ تحقق من اتصال الخادم"
+                                                "revoked" -> "الجهاز ملغى؛ تواصل مع المسؤول"
+                                                else -> "حالة التسجيل غير معروفة"
+                                            }
+                                        } catch (enrollmentError: Exception) {
+                                            "تعذر التسجيل الآمن: ${enrollmentError.javaClass.simpleName}"
+                                        }
+                                    } else "فشل الاتصال: HTTP ${e.statusCode}"
+                                } catch (e: Exception) { "فشل فحص الاتصال: ${e.javaClass.simpleName}" }
                                 runOnUiThread { enrollmentStatus = result }
                             }.start()
                         }
@@ -187,6 +267,12 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         if (::simManager.isInitialized) refreshSimStatus()
+        refreshWorkerDiagnostic()
+    }
+
+    private fun refreshWorkerDiagnostic() {
+        workerDiagnostic = getSharedPreferences("gateway_settings", MODE_PRIVATE)
+            .getString("worker_diagnostic", "لم يبدأ فحص العامل بعد") ?: "غير معروف"
     }
 
     private fun refreshSimStatus() {
@@ -200,17 +286,27 @@ private fun GatewayDashboard(
     serverUrl: String,
     enrollmentStatus: String,
     keyFingerprint: String,
+    workerDiagnostic: String,
+    onRefreshWorkerDiagnostic: () -> Unit,
     onServerUrlChange: (String) -> Unit,
     onCreateIdentity: () -> Unit,
     onTestConnection: () -> Unit,
     onProveDevice: () -> Unit,
     smsTestOptIn: Boolean,
+    workerRequested: Boolean,
     onToggleSmsTest: () -> Unit,
     onStartWorker: () -> Unit,
     onStopWorker: () -> Unit,
     onCopyEnrollment: () -> Unit,
     onScanSim: () -> Unit
 ) {
+    // Refresh the diagnostic written by the foreground worker while the dashboard is visible.
+    LaunchedEffect(Unit) {
+        while (true) {
+            onRefreshWorkerDiagnostic()
+            delay(2_000)
+        }
+    }
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(
             modifier = Modifier.fillMaxSize().padding(20.dp).verticalScroll(rememberScrollState()),
@@ -219,61 +315,55 @@ private fun GatewayDashboard(
             Text("TEST4 SMS Gateway", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF17231D))
             Text("بوابة إرسال رسائل التحقق", color = Color(0xFF63736A))
 
-            StatusCard("تسجيل الجهاز", enrollmentStatus, if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف" else "بصمة المفتاح SHA-256: $keyFingerprint")
-            Button(onClick = onCreateIdentity, modifier = Modifier.fillMaxWidth()) { Text("إنشاء مفتاح الجهاز الآمن") }
-            Button(onClick = onCopyEnrollment, modifier = Modifier.fillMaxWidth()) { Text("نسخ المفتاح العام ومعرّف الجهاز للمسؤول") }
-            OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
-                label = { Text("عنوان الخادم HTTPS") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Button(onClick = onProveDevice, modifier = Modifier.fillMaxWidth()) { Text("إثبات امتلاك مفتاح الجهاز") }
-            Button(onClick = onTestConnection, modifier = Modifier.fillMaxWidth()) { Text("حفظ العنوان وفحص اعتماد الجهاز") }
-            Text("الاتصال والشرائح", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            StatusCard("خادم مقتني لينك", "غير متصل حتى نجاح الفحص", "يتطلب تسجيل المفتاح العام وموافقة المسؤول على الخادم")
+            StatusCard("حالة البوابة", if (workerRequested) "تم طلب التشغيل" else "متوقفة",
+                "التشغيل لا يفعّل إرسال SMS تلقائياً")
+            StatusCard("آخر نتيجة", enrollmentStatus, workerDiagnostic)
+            Button(
+                onClick = if (workerRequested) onStopWorker else onStartWorker,
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (workerRequested) "إيقاف البوابة" else "تشغيل البوابة") }
+            Button(onClick = {
+                onScanSim()
+                onTestConnection()
+            }, modifier = Modifier.fillMaxWidth()) { Text("فحص الاتصال") }
+            val readySims = (simAvailability as? SimAvailability.Available)?.subscriptions
+                ?.count { it.isReady } ?: 0
+            Text("الشرائح الجاهزة: $readySims", color = Color(0xFF63736A))
+            Text("إرسال الرسائل: " + if (smsTestOptIn) "مسموح محلياً للاختبار فقط" else "معطّل محلياً",
+                color = Color(0xFF63736A))
 
-            when (val state = simAvailability) {
-                SimAvailability.PermissionRequired -> StatusCard(
-                    "الشريحة SIM 1",
-                    "إذن الوصول مطلوب",
-                    "اضغط فحص الشريحة واسمح للتطبيق بقراءة حالة الشريحة فقط"
-                )
-                SimAvailability.TelephonyUnavailable -> StatusCard(
-                    "الشريحة SIM 1",
-                    "خدمة الاتصالات غير متاحة",
-                    "تعذر الوصول إلى خدمة شرائح الهاتف على هذا الجهاز"
-                )
-                is SimAvailability.Available -> {
-                    if (state.subscriptions.isEmpty()) {
-                        StatusCard("الشريحة SIM 1", "لم يتم العثور على شريحة", "تحقق من تركيب الشريحة وتفعيلها")
-                    } else {
-                        state.subscriptions.forEach { sim ->
-                            StatusCard(
-                                "SIM ${sim.slotIndex + 1} — ${sim.displayName}",
-                                if (sim.isReady) "جاهزة" else "غير جاهزة",
-                                if (sim.isDefaultForSms) "الشريحة الافتراضية للرسائل النصية"
-                                else "معرّف الشريحة: ${sim.subscriptionId}"
-                            )
-                        }
+            var showSetup by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            Text("إعداد الجهاز والتشخيص المتقدم", color = GatewayGreen,
+                modifier = Modifier.clickable { showSetup = !showSetup })
+            if (showSetup) {
+                Text("إعداد أولي — لا تعِد إنشاء المفتاح إذا كان الجهاز مسجلاً",
+                    color = Color(0xFF8A5A16))
+                OutlinedTextField(value = serverUrl, onValueChange = onServerUrlChange,
+                    label = { Text("عنوان الخادم HTTPS") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
+                StatusCard("تسجيل الجهاز", enrollmentStatus,
+                    if (keyFingerprint.isEmpty()) "المفتاح الخاص يبقى داخل الهاتف"
+                    else "بصمة SHA-256: $keyFingerprint")
+                Text("يُنشئ التطبيق المعرّف وبصمة المفتاح تلقائياً ويحفظ المفتاح الخاص داخل Android Keystore.")
+                Text("لا يلزم نسخ البيانات أثناء الاستخدام. تسجيل جهاز جديد بالخادم لا يزال يتطلب إجراءً آمناً من المسؤول.")
+                Button(onClick = onProveDevice, modifier = Modifier.fillMaxWidth()) {
+                    Text("إكمال إثبات الجهاز المسجّل")
+                }
+                Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (smsTestOptIn) "إلغاء تصريح اختبار SMS"
+                         else "تصريح اختبار SMS المحلي — بعد موافقة المسؤول")
+                }
+                StatusCard("تشخيص العامل", workerDiagnostic, "تتحدث النتيجة عند العودة إلى الشاشة")
+                Text("حالة الشرائح", fontWeight = FontWeight.SemiBold)
+                when (val state = simAvailability) {
+                    is SimAvailability.Available -> state.subscriptions.forEach { sim ->
+                        StatusCard("SIM ${sim.slotIndex + 1} — ${sim.displayName}",
+                            if (sim.isReady) "جاهزة" else "غير جاهزة",
+                            if (sim.isDefaultForSms) "الشريحة الافتراضية" else "شريحة إضافية")
                     }
+                    else -> Text("يجب منح إذن قراءة حالة الشرائح أو فحص توفرها")
                 }
             }
-
-            Button(onClick = onToggleSmsTest, modifier = Modifier.fillMaxWidth()) {
-                Text(if (smsTestOptIn) "تعطيل اختبار إرسال SMS" else "تمكين اختبار SMS يدوياً — بعد اعتماد المسؤول")
-            }
-            Button(onClick = onStartWorker, modifier = Modifier.fillMaxWidth()) { Text("تشغيل العامل") }
-            Button(onClick = onStopWorker, modifier = Modifier.fillMaxWidth()) { Text("إيقاف العامل") }
-            Button(onClick = onScanSim, modifier = Modifier.fillMaxWidth()) {
-                Text("فحص الشريحة")
-            }
-
-            Text("إحصاءات الإرسال", fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MetricCard("مرسلة", "0", Modifier.weight(1f))
-                MetricCard("فاشلة", "0", Modifier.weight(1f))
-                MetricCard("معلّقة", "0", Modifier.weight(1f))
-            }
-
-            Spacer(modifier = Modifier.height(4.dp))
-            Text("نسخة تأسيسية — لا تنفذ إرسال SMS حالياً", color = Color(0xFF8A5A16), fontSize = 12.sp)
         }
     }
 }

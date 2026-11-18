@@ -27,6 +27,12 @@ class GatewayEnrollmentClient(private val baseUrl: String, private val identity:
             return JSONObject(text)
         } finally { conn.disconnect() }
     }
+    fun requestEnrollment(): JSONObject {
+        identity.ensureKey()
+        return post("/v1/gateway/enrollment/request", JSONObject()
+            .put("deviceId", identity.deviceId)
+            .put("publicKeyPem", identity.publicKeyPem()))
+    }
     fun prove(): JSONObject {
         identity.ensureKey()
         val id = identity.deviceId

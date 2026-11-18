@@ -19,7 +19,7 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = ".fin25sandbox2026"
             versionNameSuffix = "-debug"
         }
         release {
