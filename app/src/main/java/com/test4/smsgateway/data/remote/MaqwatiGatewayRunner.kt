@@ -12,6 +12,7 @@ import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
 import com.test4.smsgateway.platform.telephony.AndroidSimManager
 import com.test4.smsgateway.platform.telephony.SimAvailability
+import com.test4.smsgateway.domain.model.*
 import org.json.JSONObject
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -26,29 +27,40 @@ class MaqwatiGatewayRunner(
     private val context: Context,
     private val api: MaqwatiGatewayApi,
     private val simManager: AndroidSimManager = AndroidSimManager(context),
-) {
-    fun runOne(): Boolean {
-        // Invoked only after explicit device-side opt-in; server also requires operator enable.
+    private val isActive: () -> Boolean = { true },
+) : GatewayDispatchPort {
+    fun runOne(): DispatchResult = GatewayDispatchCycle(this).runOne()
+
+    override fun readiness(): DispatchReadiness {
+        if (!isActive() || Thread.currentThread().isInterrupted ||
+            !context.getSharedPreferences("gateway_settings", Context.MODE_PRIVATE)
+                .getBoolean("sms_test_opt_in", false)) return DispatchReadiness.LocalDisabled
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
-            != PackageManager.PERMISSION_GRANTED) return false
+            != PackageManager.PERMISSION_GRANTED) return DispatchReadiness.SmsPermissionRequired
+        val available = simManager.getAvailableSims()
+        if (available is SimAvailability.PermissionRequired) return DispatchReadiness.PhonePermissionRequired
+        val sims = (available as? SimAvailability.Available)?.subscriptions
+        val sim = sims?.firstOrNull { it.isReady && it.isDefaultForSms }
+            ?: sims?.firstOrNull { it.isReady }
+            ?: return DispatchReadiness.NoReadySim
+        return DispatchReadiness.Ready(GatewaySim(sim.subscriptionId, sim.slotIndex))
+    }
+
+    override fun poll(): GatewayJob? {
         val response = JSONObject(api.poll())
-        if (response.isNull("job")) return false
+        if (response.isNull("job")) return null
         val job = response.getJSONObject("job")
-        val id = UUID.fromString(job.getString("id"))
+        val id = UUID.fromString(job.getString("id")).toString()
         val recipient = job.getString("recipient")
-        val message = job.getString("text")
         require(recipient.matches(Regex("^\\+967[0-9]{9}$")))
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
-            != PackageManager.PERMISSION_GRANTED) {
-            return false
-        }
-        val available = simManager.getAvailableSims() as? SimAvailability.Available
-        val sim = available?.subscriptions?.firstOrNull { it.isReady && it.isDefaultForSms }
-            ?: available?.subscriptions?.firstOrNull { it.isReady }
-        if (sim == null) {
-            api.report(id, "failed", 0)
-            return true
-        }
+        return GatewayJob(id, recipient, job.getString("text"))
+    }
+
+    override fun report(job: GatewayJob, status: String, sim: GatewaySim) {
+        api.report(UUID.fromString(job.id), status, sim.slotIndex)
+    }
+
+    override fun submit(job: GatewayJob, sim: GatewaySim): SmsSubmission {
         val action = "${context.packageName}.SMS_SENT.${UUID.randomUUID()}"
         val latch = CountDownLatch(1)
         var success = false
@@ -70,18 +82,16 @@ class MaqwatiGatewayRunner(
                 context.getSystemService(SmsManager::class.java)
                     .createForSubscriptionId(sim.subscriptionId)
             else SmsManager.getSmsManagerForSubscriptionId(sim.subscriptionId)
-            val parts = manager.divideMessage(message)
+            val parts = manager.divideMessage(job.text)
             // Each segment needs its own confirmation; one sent result is not enough.
             // Limit pilot to a single SMS segment until multipart acknowledgements are implemented.
-            require(parts.size == 1) { "Multipart SMS not yet supported safely" }
-            manager.sendTextMessage(recipient, null, message, pending, null)
-            if (latch.await(30, TimeUnit.SECONDS)) {
-                api.report(id, if (success) "sent" else "failed", sim.slotIndex)
-            }
-            // Timeout is uncertain: allow server lease to expire, but do not ACK 'failed'.
+            if (parts.size != 1) return SmsSubmission.UNSUPPORTED_MESSAGE
+            manager.sendTextMessage(job.recipient, null, job.text, pending, null)
+            return if (latch.await(30, TimeUnit.SECONDS)) {
+                if (success) SmsSubmission.SENT else SmsSubmission.FAILED
+            } else SmsSubmission.UNKNOWN
         } finally {
             try { context.unregisterReceiver(receiver) } catch (_: IllegalArgumentException) {}
         }
-        return true
     }
 }
