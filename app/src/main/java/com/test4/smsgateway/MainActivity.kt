@@ -220,7 +220,30 @@ class MainActivity : ComponentActivity() {
                                 val result = try {
                                     MaqwatiGatewayApi(url, identity.deviceId, DeviceIdentity.ALIAS).heartbeat()
                                     "الخادم متصل والجهاز معتمد"
-                                } catch (e: Exception) { "لم يتم الاتصال أو لم يُعتمد الجهاز: ${e.javaClass.simpleName}" }
+                                } catch (e: com.test4.smsgateway.data.remote.GatewayHttpException) {
+                                    if (e.statusCode == 401 || e.statusCode == 409) {
+                                        try {
+                                            val enrollment = GatewayEnrollmentClient(url, identity)
+                                            val response = enrollment.requestEnrollment()
+                                            when (response.optString("status")) {
+                                                "pending" -> {
+                                                    try {
+                                                        enrollment.prove()
+                                                        "تم إثبات هوية الجهاز؛ بانتظار اعتماد المسؤول"
+                                                    } catch (_: Exception) {
+                                                        "طلب التسجيل معلق؛ تعذر إكمال إثبات المفتاح"
+                                                    }
+                                                }
+                                                "proved" -> "هوية الجهاز مثبتة؛ بانتظار اعتماد المسؤول"
+                                                "active" -> "الجهاز معتمد؛ تحقق من اتصال الخادم"
+                                                "revoked" -> "الجهاز ملغى؛ تواصل مع المسؤول"
+                                                else -> "حالة التسجيل غير معروفة"
+                                            }
+                                        } catch (enrollmentError: Exception) {
+                                            "تعذر التسجيل الآمن: ${enrollmentError.javaClass.simpleName}"
+                                        }
+                                    } else "فشل الاتصال: HTTP ${e.statusCode}"
+                                } catch (e: Exception) { "فشل فحص الاتصال: ${e.javaClass.simpleName}" }
                                 runOnUiThread { enrollmentStatus = result }
                             }.start()
                         }
